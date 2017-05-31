@@ -7,3 +7,7 @@
 *~
 dataset/*
 .ipynb_checkpoints/*
+*.csv
+tests/*
+weights/*
+
