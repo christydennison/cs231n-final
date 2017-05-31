@@ -16,11 +16,12 @@ cwd = os.getcwd()
 import csv
 
 class TestModel(object):
-    def __init__(self, model, model_weights_path="model_params_scaling.pth", scaling=224, dtype = torch.cuda.FloatTensor):
+    def __init__(self, model, model_weights_path=None, scaling=224, dtype = torch.cuda.FloatTensor):
         dset = KaggleImageFolder(os.path.join(cwd, 'dataset/test'), transforms.Compose([ScaleSquare(scaling),transforms.ToTensor()]))
-        self.dset_loader = torch.utils.data.DataLoader(dset, batch_size=1, shuffle=True, num_workers=1)
-        model_save_dir = os.path.join(cwd,"model_params_scaling")
-        model.load_state_dict(torch.load(model_save_dir))
+        self.dset_loader = torch.utils.data.DataLoader(dset, batch_size=1, shuffle=False, num_workers=1)
+        if model_weights_path != None:
+            model_save_dir = os.path.join(cwd, model_weights_path)
+            model.load_state_dict(torch.load(model_save_dir))
         self.model = model
         self.dtype = dtype
 
