@@ -14,10 +14,13 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data import VOCroot, v2, v1, AnnotationTransform, VOCDetection, detection_collate, BaseTransform
+from data/voc_invasive import AnnotationTransform, VOCDetection
+from data/config_invasive import VOCroot, v2, v1
+from data/voc_invasive import VOCroot, v2, v1, AnnotationTransform, VOCDetection, detection_collate
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
 import time
+from ScaleSquareTransform import ScaleSquare
 
 
 class SSDSolver(object):
@@ -62,8 +65,8 @@ class SSDSolver(object):
         epoch = 0
         print('Loading Dataset...')
 
-        dataset = VOCDetection(VOCroot, train_sets, BaseTransform(
-            self.ssd_dim, self.rgb_means), AnnotationTransform())
+        dataset = VOCDetection(VOCroot, train_sets, ScaleSquare(
+            self.ssd_dim), AnnotationTransform())
         epoch_size = len(dataset) // self.batch_size
         print('Training SSD on', dataset.name)
         step_index = 0
