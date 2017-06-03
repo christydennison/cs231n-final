@@ -7,7 +7,7 @@ class ScaleSquare(object):
     size: size of both edges
     interpolation: Default: PIL.Image.BILINEAR
     """
-    def __init__(self, size, interpolation=Image.ANTIALIAS):
+    def __init__(self, size, interpolation=Image.LANCZOS):
         assert isinstance(size, int)
         self.size = size
         self.interpolation = interpolation

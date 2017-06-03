@@ -29,7 +29,7 @@ class SSDSolver(object):
         self.batch_size = kwargs.pop('batch_size', 16)
         self.visdom = kwargs.pop('visdom', False)
         self.gamma = kwargs.pop('gamma', False)
-        self.cuda = kwargs.pop('cuda', True)
+        self.cuda = kwargs.pop('cuda', False)
         self.weight_decay = kwargs.pop('weight_decay', 0.0005)
         self.momentum = kwargs.pop('momentum', 0.9)
         self.lr = kwargs.pop('lr', True)
@@ -50,7 +50,7 @@ class SSDSolver(object):
 
         self.optimizer = optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
-        self.criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False)
+        self.criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 15, 0.5, False)
         
         if self.cuda:
             self.model.cuda()
@@ -123,6 +123,7 @@ class SSDSolver(object):
                 targets = [Variable(anno) for anno in targets]
             # forward
             t0 = time.time()
+            print(type(images.data))
             out = self.model(images)
             # backprop
             self.optimizer.zero_grad()
