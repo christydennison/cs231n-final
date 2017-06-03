@@ -14,9 +14,8 @@ import torch.nn.init as init
 import argparse
 from torch.autograd import Variable
 import torch.utils.data as data
-from data/voc_invasive import AnnotationTransform, VOCDetection
-from data/config_invasive import VOCroot, v2, v1
-from data/voc_invasive import VOCroot, v2, v1, AnnotationTransform, VOCDetection, detection_collate
+from data.voc_invasive import AnnotationTransform, VOCDetection, detection_collate
+from data.config_invasive import VOCroot, v2, v1
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
 import time
@@ -24,8 +23,9 @@ from ScaleSquareTransform import ScaleSquare
 
 
 class SSDSolver(object):
-    def __init__(self, model, data, num_classes, **kwargs):
+    def __init__(self, model, num_classes=2, **kwargs):
         ## kwargs
+        self.model = model
         self.batch_size = kwargs.pop('batch_size', 16)
         self.visdom = kwargs.pop('visdom', False)
         self.gamma = kwargs.pop('gamma', False)
@@ -37,36 +37,34 @@ class SSDSolver(object):
         self.version = kwargs.pop('version', 'v2')
         
         self.accum_batch_size = 32
-        self.iter_size = accum_batch_size / batch_size
+        self.iter_size = self.accum_batch_size / self.batch_size
         self.max_iter = 120000
         self.stepvalues = (80000, 100000, 120000)
-        self.train_sets = [('2007', 'trainval'), ('2012', 'trainval')]
         self.ssd_dim = 300  # only support 300 now
         self.rgb_means = (104, 117, 123)  # only support voc now
         
         ## initializations
-        net.extras.apply(weights_init)
-        net.loc.apply(weights_init)
-        net.conf.apply(weights_init)
+        self.model.extras.apply(weights_init)
+        self.model.loc.apply(weights_init)
+        self.model.conf.apply(weights_init)
 
-        optimizer = optim.SGD(net.parameters(), lr=self.lr,
+        self.optimizer = optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
-        criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False)
+        self.criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 3, 0.5, False)
         
         if self.cuda:
-            net.cuda()
+            self.model.cuda()
             cudnn.benchmark = True
 
-    def train():
-        net.train()
+    def train(self):
+        self.model.train()
         # loss counters
         loc_loss = 0  # epoch
         conf_loss = 0
         epoch = 0
         print('Loading Dataset...')
 
-        dataset = VOCDetection(VOCroot, train_sets, ScaleSquare(
-            self.ssd_dim), AnnotationTransform())
+        dataset = VOCDetection(VOCroot, target_transform=AnnotationTransform())
         epoch_size = len(dataset) // self.batch_size
         print('Training SSD on', dataset.name)
         step_index = 0
@@ -92,14 +90,14 @@ class SSDSolver(object):
                     legend=['Loc Loss', 'Conf Loss', 'Loss']
                 )
             )
-        for iteration in range(max_iter):
+        for iteration in range(self.max_iter):
             if iteration % epoch_size == 0:
                 # create batch iterator
-                batch_iterator = iter(data.DataLoader(dataset, batch_size,
+                batch_iterator = iter(data.DataLoader(dataset, self.batch_size,
                                                       shuffle=True, collate_fn=detection_collate))
-            if iteration in stepvalues:
+            if iteration in self.stepvalues:
                 step_index += 1
-                adjust_learning_rate(optimizer, self.gamma, step_index)
+                adjust_learning_rate(self.optimizer, self.gamma, step_index)
                 if self.visdom:
                     viz.line(
                         X=torch.ones((1, 3)).cpu() * epoch,
@@ -125,13 +123,13 @@ class SSDSolver(object):
                 targets = [Variable(anno) for anno in targets]
             # forward
             t0 = time.time()
-            out = net(images)
+            out = self.model(images)
             # backprop
-            optimizer.zero_grad()
-            loss_l, loss_c = criterion(out, targets)
+            self.optimizer.zero_grad()
+            loss_l, loss_c = self.criterion(out, targets)
             loss = loss_l + loss_c
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
             t1 = time.time()
             loc_loss += loss_l.data[0]
             conf_loss += loss_c.data[0]
@@ -156,25 +154,24 @@ class SSDSolver(object):
                         update=True
                     )
             if iteration % 5000 == 0:
-                torch.save(net.state_dict(), 'weights/ssd300_0712_iter_' +
+                torch.save(self.model.state_dict(), 'weights/ssd300_invasive_iter_' +
                            repr(iteration) + '.pth')
         torch.save(net.state_dict(), self.save_folder + '' + self.version + '.pth')
 
 
-    def adjust_learning_rate(optimizer, gamma, step):
-        """Sets the learning rate to the initial LR decayed by 10 at every specified step
+def adjust_learning_rate(optimizer, gamma, step):
+    """Sets the learning rate to the initial LR decayed by 10 at every specified step
         # Adapted from PyTorch Imagenet example:
         # https://github.com/pytorch/examples/blob/master/imagenet/main.py
         """
-        lr = args.lr * (gamma ** (step))
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+    lr = args.lr * (gamma ** (step))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
-    def xavier(param):
-        init.xavier_uniform(param)
+def xavier(param):
+    init.xavier_uniform(param)
 
-
-    def weights_init(m):
-        if isinstance(m, nn.Conv2d):
-            xavier(m.weight.data)
-            m.bias.data.zero_()
+def weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        xavier(m.weight.data)
+        m.bias.data.zero_()
