@@ -16,17 +16,17 @@ cwd = os.getcwd()
 import csv
 
 class TestModelEnsemble(object):
-    def __init__(self, models, scaling=224, dtype = torch.cuda.FloatTensor):
+    def __init__(self, models, scaling=224, dtype = torch.cuda.FloatTensor, scheme='ave'):
         dset = KaggleImageFolder(os.path.join(cwd, 'dataset/test'), transforms.Compose([ScaleSquare(scaling),transforms.ToTensor()]))
         self.dset_loader = torch.utils.data.DataLoader(dset, batch_size=1, shuffle=False, num_workers=1)
         self.models = models
         self.dtype = dtype
-        self.use_probs = use_probs
+        self.scheme = scheme
 
     def submit(self, name="test_ens_0.csv", message="submission_ens_0"):
         name_to_pred = self._compute_test_results()
         self._create_submission_file(name, name_to_pred)
-        #self.send_to_kaggle(name, message)
+        self.send_to_kaggle(name, message)
         print("Submission complete!")
 
     def send_to_kaggle(self, name, message):
@@ -50,9 +50,14 @@ class TestModelEnsemble(object):
             x_var = Variable(x.type(self.dtype), volatile=True)
 
             scores = []
-            for model in models:
+            for model in self.models:
                 scores.append(softmax_fn(model(x_var)))
-            probs = torch.stack(scores).sum(0)/num_models
+
+            probs = None
+            if self.scheme == 'ave':
+                probs = torch.stack(scores).sum(0).squeeze(0)/num_models
+            elif self.scheme == 'max':
+                probs = torch.stack(scores).squeeze(0).max(0)[0].squeeze(0)
             
             path = os.path.basename(full_path[0]).split('.jpg')[0]
             name_to_pred[path] = probs.data.cpu()[0,0]
