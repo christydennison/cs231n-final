@@ -1,9 +1,9 @@
-from __future__ import print_function
+#from __future__ import print_function
 import os
 import sys
-module_path = os.path.abspath(os.path.join('../ssd_pytorch/'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
+#module_path = os.path.abspath(os.path.join('../ssd_pytorch/'))
+#if module_path not in sys.path:
+#    sys.path.append(module_path)
 
 import torch
 import torch.nn as nn
@@ -16,14 +16,14 @@ from torch.autograd import Variable
 import torch.utils.data as data
 from data.voc_invasive import AnnotationTransform, VOCDetection, detection_collate
 from data.config_invasive import VOCroot, v2, v1
-from layers.modules import MultiBoxLoss
+from multibox_loss import MultiBoxLoss
 from ssd import build_ssd
 import time
 from ScaleSquareTransform import ScaleSquare
 
 
 class SSDSolver(object):
-    def __init__(self, model, num_classes=2, **kwargs):
+    def __init__(self, model, num_classes=3, **kwargs):
         ## kwargs
         self.model = model
         self.batch_size = kwargs.pop('batch_size', 16)
@@ -32,14 +32,14 @@ class SSDSolver(object):
         self.cuda = kwargs.pop('cuda', False)
         self.weight_decay = kwargs.pop('weight_decay', 0.0005)
         self.momentum = kwargs.pop('momentum', 0.9)
-        self.lr = kwargs.pop('lr', True)
+        self.lr = kwargs.pop('lr', 0.001)
         self.save_folder = kwargs.pop('save_folder', 'weights')
         self.version = kwargs.pop('version', 'v2')
         
         self.accum_batch_size = 32
         self.iter_size = self.accum_batch_size / self.batch_size
-        self.max_iter = 120000
-        self.stepvalues = (80000, 100000, 120000)
+        self.max_iter = 200
+        self.stepvalues = (50, 100, 150)
         self.ssd_dim = 300  # only support 300 now
         self.rgb_means = (104, 117, 123)  # only support voc now
         
@@ -51,6 +51,10 @@ class SSDSolver(object):
         self.optimizer = optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
         self.criterion = MultiBoxLoss(num_classes, 0.5, True, 0, True, 15, 0.5, False)
+        
+        if self.visdom:
+            import visdom
+            self.viz = visdom.Visdom()
         
         if self.cuda:
             self.model.cuda()
@@ -66,11 +70,11 @@ class SSDSolver(object):
 
         dataset = VOCDetection(VOCroot, target_transform=AnnotationTransform())
         epoch_size = len(dataset) // self.batch_size
-        print('Training SSD on', dataset.name)
+        print('Training SSD on', dataset.name, "with epoch size",epoch_size)
         step_index = 0
         if self.visdom:
             # initialize visdom loss plot
-            lot = viz.line(
+            lot = self.viz.line(
                 X=torch.zeros((1,)).cpu(),
                 Y=torch.zeros((1, 3)).cpu(),
                 opts=dict(
@@ -80,7 +84,7 @@ class SSDSolver(object):
                     legend=['Loc Loss', 'Conf Loss', 'Loss']
                 )
             )
-            epoch_lot = viz.line(
+            epoch_lot = self.viz.line(
                 X=torch.zeros((1,)).cpu(),
                 Y=torch.zeros((1, 3)).cpu(),
                 opts=dict(
@@ -91,15 +95,17 @@ class SSDSolver(object):
                 )
             )
         for iteration in range(self.max_iter):
+            #print("new iter!",iteration)
             if iteration % epoch_size == 0:
                 # create batch iterator
                 batch_iterator = iter(data.DataLoader(dataset, self.batch_size,
                                                       shuffle=True, collate_fn=detection_collate))
             if iteration in self.stepvalues:
+                print("adjusting learning rate",iteration)
                 step_index += 1
-                adjust_learning_rate(self.optimizer, self.gamma, step_index)
+                self.adjust_learning_rate(self.optimizer, self.gamma, step_index)
                 if self.visdom:
-                    viz.line(
+                    self.viz.line(
                         X=torch.ones((1, 3)).cpu() * epoch,
                         Y=torch.Tensor([loc_loss, conf_loss,
                             loc_loss + conf_loss]).unsqueeze(0).cpu() / epoch_size,
@@ -123,7 +129,7 @@ class SSDSolver(object):
                 targets = [Variable(anno) for anno in targets]
             # forward
             t0 = time.time()
-            print(type(images.data))
+            #print(type(images.data))
             out = self.model(images)
             # backprop
             self.optimizer.zero_grad()
@@ -138,7 +144,8 @@ class SSDSolver(object):
                 print('Timer: %.4f sec.' % (t1 - t0))
                 print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')
             if self.visdom:
-                viz.line(
+                print("plotting visdom")
+                self.viz.line(
                     X=torch.ones((1, 3)).cpu() * iteration,
                     Y=torch.Tensor([loss_l.data[0], loss_c.data[0],
                         loss_l.data[0] + loss_c.data[0]]).unsqueeze(0).cpu(),
@@ -147,27 +154,31 @@ class SSDSolver(object):
                 )
                 # hacky fencepost solution for 0th epoch plot
                 if iteration == 0:
-                    viz.line(
+                    self.viz.line(
                         X=torch.zeros((1, 3)).cpu(),
                         Y=torch.Tensor([loc_loss, conf_loss,
                             loc_loss + conf_loss]).unsqueeze(0).cpu(),
                         win=epoch_lot,
                         update=True
                     )
-            if iteration % 5000 == 0:
-                torch.save(self.model.state_dict(), 'weights/ssd300_invasive_iter_' +
-                           repr(iteration) + '.pth')
-        torch.save(net.state_dict(), self.save_folder + '' + self.version + '.pth')
+            #if iteration % 25 == 0:
+            #    print("saving dict iter")
+            #    torch.save(self.model.state_dict(), 'weights/ssd300_invasive_iter_' +
+            #               repr(iteration) + '.pth')
+
+        print("saving dict")
+        torch.save(self.model.state_dict(), self.save_folder + '/invasive_end' + self.version + '.pth')
+        print("Completed training")
 
 
-def adjust_learning_rate(optimizer, gamma, step):
-    """Sets the learning rate to the initial LR decayed by 10 at every specified step
-        # Adapted from PyTorch Imagenet example:
-        # https://github.com/pytorch/examples/blob/master/imagenet/main.py
-        """
-    lr = args.lr * (gamma ** (step))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+    def adjust_learning_rate(self, optimizer, gamma, step):
+        """Sets the learning rate to the initial LR decayed by 10 at every specified step
+            # Adapted from PyTorch Imagenet example:
+            # https://github.com/pytorch/examples/blob/master/imagenet/main.py
+            """
+        lr = self.lr * (gamma ** (step))
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
 
 def xavier(param):
     init.xavier_uniform(param)

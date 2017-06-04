@@ -10,4 +10,4 @@ dataset/*
 *.csv
 tests/*
 weights/*
-
+*.pth
