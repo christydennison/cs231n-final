@@ -51,7 +51,7 @@ class TestModelEnsemble(object):
 
             scores = []
             for model in self.models:
-                scores.append(softmax_fn(model(x_var)))
+                scores.append(softmax_fn(model(x_var))[:,0:2])
 
             probs = None
             if self.scheme == 'ave':
