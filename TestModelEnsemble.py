@@ -16,12 +16,13 @@ cwd = os.getcwd()
 import csv
 
 class TestModelEnsemble(object):
-    def __init__(self, models, scaling=224, dtype = torch.cuda.FloatTensor, scheme='ave'):
+    def __init__(self, models, scaling=224, dtype = torch.cuda.FloatTensor, scheme='ave', error_weights=None):
         dset = KaggleImageFolder(os.path.join(cwd, 'dataset/test'), transforms.Compose([ScaleSquare(scaling),transforms.ToTensor()]))
         self.dset_loader = torch.utils.data.DataLoader(dset, batch_size=1, shuffle=False, num_workers=1)
         self.models = models
         self.dtype = dtype
         self.scheme = scheme
+        self.error_weights = error_weights
 
     def submit(self, name="test_ens_0.csv", message="submission_ens_0"):
         name_to_pred = self._compute_test_results()
@@ -50,15 +51,19 @@ class TestModelEnsemble(object):
             x_var = Variable(x.type(self.dtype), volatile=True)
 
             scores = []
-            for model in self.models:
-                scores.append(softmax_fn(model(x_var))[:,0:2])
+            for idx, model in enumerate(self.models):
+                pscore = softmax_fn(model(x_var))[:,0:2]
+                if self.error_weights is not None:
+                    pscore = pscore*self.error_weights[idx]
+                scores.append(pscore)
 
             probs = None
             if self.scheme == 'ave':
-                probs = torch.stack(scores).sum(0).squeeze(0)/num_models
+                divisor = self.error_weights.sum() if self.error_weights is not None else num_models
+                probs = torch.stack(scores).sum(0).squeeze(0)/divisor
             elif self.scheme == 'max':
                 probs = torch.stack(scores).squeeze(0).max(0)[0].squeeze(0)
-            
+
             path = os.path.basename(full_path[0]).split('.jpg')[0]
             name_to_pred[path] = probs.data.cpu()[0,0]
 
